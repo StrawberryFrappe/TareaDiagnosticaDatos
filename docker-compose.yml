@@ -1,0 +1,24 @@
+services:
+  miner:
+    build: ./miner
+    container_name: github-miner
+    env_file: .env
+    volumes:
+      - shared_data:/data
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  visualizer:
+    build: ./visualizer
+    container_name: github-visualizer
+    volumes:
+      - shared_data:/data
+    ports:
+      - "3000:3000"
+    depends_on:
+      - miner
+    restart: unless-stopped
+
+volumes:
+  shared_data:

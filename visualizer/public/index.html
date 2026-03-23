@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GitHub Word Frequency Visualizer</title>
+  <meta name="description" content="Real-time visualization of the most common words found in popular GitHub repository function names." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:   #0f0f1a;
+      --bg-card:      rgba(255, 255, 255, 0.04);
+      --bg-card-hover:rgba(255, 255, 255, 0.07);
+      --border:       rgba(255, 255, 255, 0.08);
+      --text-primary: #e8e8f0;
+      --text-muted:   #8888a8;
+      --accent:       #6c5ce7;
+      --accent-glow:  rgba(108, 92, 231, 0.35);
+      --success:      #00b894;
+      --danger:       #ff6b6b;
+      --warning:      #fdcb6e;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── Animated background ──────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: radial-gradient(ellipse at 20% 50%, rgba(108, 92, 231, 0.08) 0%, transparent 50%),
+                  radial-gradient(ellipse at 80% 20%, rgba(0, 184, 148, 0.06) 0%, transparent 50%),
+                  radial-gradient(ellipse at 50% 80%, rgba(253, 203, 110, 0.04) 0%, transparent 50%);
+      animation: bgShift 20s ease-in-out infinite alternate;
+      z-index: -1;
+    }
+    @keyframes bgShift {
+      0%   { transform: translate(0, 0) rotate(0deg); }
+      100% { transform: translate(-5%, 3%) rotate(3deg); }
+    }
+
+    /* ─── Layout ───────────────────────────────────────────────── */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #6c5ce7, #a29bfe, #00b894);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-top: 0.4rem;
+    }
+
+    /* ─── Glass Card ───────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: background 0.3s;
+    }
+    .card:hover { background: var(--bg-card-hover); }
+
+    /* ─── Control Panel ────────────────────────────────────────── */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.4rem 1rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background 0.3s;
+    }
+    .status-badge[data-status="idle"] .status-dot       { background: var(--text-muted); }
+    .status-badge[data-status="mining"] .status-dot     { background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 1.5s infinite; }
+    .status-badge[data-status="stopping"] .status-dot   { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1.3rem;
+      border: none;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+    }
+    .btn:active { transform: scale(0.96); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+    .btn-start {
+      background: linear-gradient(135deg, #00b894, #00cec9);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(0, 184, 148, 0.3);
+    }
+    .btn-start:hover:not(:disabled) { box-shadow: 0 6px 20px rgba(0, 184, 148, 0.45); }
+
+    .btn-stop {
+      background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+    }
+    .btn-stop:hover:not(:disabled) { box-shadow: 0 6px 20px rgba(255, 107, 107, 0.45); }
+
+    /* ─── Top-N Input ──────────────────────────────────────────── */
+    .topn-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-left: auto;
+    }
+    .topn-group label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .topn-group input {
+      width: 70px;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.05);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.9rem;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .topn-group input:focus { border-color: var(--accent); }
+
+    /* ─── Stats row ────────────────────────────────────────────── */
+    .stats {
+      display: flex;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+    .stat-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ─── Chart Area ───────────────────────────────────────────── */
+    .chart-wrapper {
+      position: relative;
+      height: 600px;           /* explicit structural height */
+      width: 100%;
+    }
+    .chart-wrapper canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 300px;
+      color: var(--text-muted);
+      gap: 0.8rem;
+    }
+    .empty-state svg { opacity: 0.3; }
+    .empty-state p { font-size: 0.95rem; }
+
+    /* ─── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .container { padding: 1rem; }
+      header h1 { font-size: 1.5rem; }
+      .controls { flex-direction: column; align-items: stretch; }
+      .topn-group { margin-left: 0; justify-content: center; }
+      .chart-wrapper { height: 450px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>GitHub Word Frequency Visualizer</h1>
+      <p>Most common words in function &amp; method names across popular repos</p>
+    </header>
+
+    <div class="card">
+      <!-- Controls -->
+      <div class="controls">
+        <div class="status-badge" id="statusBadge" data-status="idle">
+          <span class="status-dot"></span>
+          <span id="statusText">Idle</span>
+        </div>
+        <button class="btn btn-start" id="btnStart" onclick="startMiner()">▶ Start Miner</button>
+        <button class="btn btn-stop"  id="btnStop"  onclick="stopMiner()" disabled>■ Stop Miner</button>
+        <div class="topn-group">
+          <label for="topN">Show Top</label>
+          <input type="number" id="topN" value="25" min="5" max="200" />
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats">
+        <div class="stat-item">
+          <span class="stat-value" id="repoCount">0</span>
+          <span class="stat-label">Repos Mined</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" id="wordCount">0</span>
+          <span class="stat-label">Unique Words</span>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div id="chartArea">
+        <div class="empty-state" id="emptyState">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 4-6"/>
+          </svg>
+          <p>No data yet – start the miner to begin collecting words</p>
+        </div>
+        <div class="chart-wrapper" id="chartWrapper" style="display:none;">
+          <canvas id="chart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ─── State ────────────────────────────────────────────────────
+    let allWords = {};
+    let chart = null;
+
+    const btnStart    = document.getElementById("btnStart");
+    const btnStop     = document.getElementById("btnStop");
+    const statusBadge = document.getElementById("statusBadge");
+    const statusText  = document.getElementById("statusText");
+    const topNInput   = document.getElementById("topN");
+    const repoCountEl = document.getElementById("repoCount");
+    const wordCountEl = document.getElementById("wordCount");
+    const emptyState  = document.getElementById("emptyState");
+    const chartWrapper= document.getElementById("chartWrapper");
+
+    // ─── Chart setup ──────────────────────────────────────────────
+    function initChart() {
+      const ctx = document.getElementById("chart").getContext("2d");
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderRadius: 4, barThickness: 18 }] },
+        options: {
+          indexAxis: "y",
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 400, easing: "easeOutQuart" },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "rgba(15,15,26,0.9)",
+              titleFont: { family: "Inter", size: 13 },
+              bodyFont: { family: "Inter", size: 12 },
+              padding: 10,
+              cornerRadius: 8,
+              borderColor: "rgba(255,255,255,0.1)",
+              borderWidth: 1,
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: "rgba(255,255,255,0.04)" },
+              ticks: { color: "#8888a8", font: { family: "Inter", size: 11 } },
+              title: { display: true, text: "Occurrences", color: "#8888a8", font: { family: "Inter", size: 12 } }
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: "#e8e8f0", font: { family: "Inter", size: 12, weight: 500 } },
+            },
+          },
+        },
+      });
+    }
+
+    function generateColors(count) {
+      const colors = [];
+      for (let i = 0; i < count; i++) {
+        const hue = (270 + (i * 137.508)) % 360;  // golden-angle spread
+        colors.push(`hsla(${hue}, 65%, 60%, 0.8)`);
+      }
+      return colors;
+    }
+
+    function updateChart() {
+      const n = parseInt(topNInput.value, 10) || 25;
+      const sorted = Object.entries(allWords)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, n);
+
+      if (sorted.length === 0) {
+        emptyState.style.display = "flex";
+        chartWrapper.style.display = "none";
+        return;
+      }
+
+      emptyState.style.display = "none";
+      chartWrapper.style.display = "block";
+
+      // Dynamically adjust chart wrapper height based on bar count
+      const dynamicHeight = Math.max(400, sorted.length * 28 + 80);
+      chartWrapper.style.height = dynamicHeight + "px";
+
+      const labels = sorted.map(([w]) => w);
+      const data   = sorted.map(([, c]) => c);
+      const colors = generateColors(sorted.length);
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+      chart.data.datasets[0].backgroundColor = colors;
+      chart.update();
+    }
+
+    topNInput.addEventListener("input", updateChart);
+
+    // ─── Status helpers ───────────────────────────────────────────
+    function setStatus(status) {
+      const labels = { idle: "Idle", mining: "Mining", stopping: "Stopping…" };
+      statusBadge.dataset.status = status;
+      statusText.textContent = labels[status] || status;
+
+      btnStart.disabled = (status === "mining" || status === "stopping");
+      btnStop.disabled  = (status !== "mining");
+    }
+
+    async function fetchStatus() {
+      try {
+        const res  = await fetch("/api/miner/status");
+        const data = await res.json();
+        setStatus(data.status);
+      } catch {
+        setStatus("idle");
+      }
+    }
+
+    // ─── Miner control ───────────────────────────────────────────
+    async function startMiner() {
+      btnStart.disabled = true;
+      try {
+        const res = await fetch("/api/miner/start", { method: "POST" });
+        const data = await res.json();
+        setStatus(data.status || "mining");
+      } catch {
+        btnStart.disabled = false;
+      }
+    }
+
+    async function stopMiner() {
+      btnStop.disabled = true;
+      try {
+        const res = await fetch("/api/miner/stop", { method: "POST" });
+        const data = await res.json();
+        setStatus(data.status || "stopping");
+        // Poll until idle
+        const poll = setInterval(async () => {
+          const r = await fetch("/api/miner/status");
+          const d = await r.json();
+          if (d.status === "idle") {
+            setStatus("idle");
+            clearInterval(poll);
+          }
+        }, 2000);
+      } catch {
+        btnStop.disabled = false;
+      }
+    }
+
+    // ─── WebSocket ────────────────────────────────────────────────
+    function connectWS() {
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${location.host}`);
+
+      ws.addEventListener("message", (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "update") {
+            allWords = msg.words;
+            repoCountEl.textContent = msg.repoCount || 0;
+            wordCountEl.textContent = Object.keys(allWords).length;
+            updateChart();
+          }
+        } catch { /* ignore non-JSON */ }
+      });
+
+      ws.addEventListener("close", () => {
+        console.log("[ws] Disconnected – reconnecting in 3s");
+        setTimeout(connectWS, 3000);
+      });
+
+      ws.addEventListener("error", () => ws.close());
+    }
+
+    // ─── Init ─────────────────────────────────────────────────────
+    initChart();
+    fetchStatus();
+    connectWS();
+  </script>
+</body>
+</html>
